@@ -61,6 +61,11 @@ const client = new MongoClient(uri, {
 async function run() {
   try {
     const userCollection = client.db("gym-site").collection("users");
+    const reviewCollection = client.db("gym-site").collection("reviewData");
+    const forumCollection = client.db("gym-site").collection("forumData");
+    const newsletterSubscriptionCollection = client
+      .db("gym-site")
+      .collection("newsletterSubscription");
 
     // jwt related api
     app.post("/jwt", async (req, res) => {
@@ -87,6 +92,26 @@ async function run() {
         return res.send({ message: "user already exists", insertedId: null });
       }
       const result = await userCollection.insertOne(user);
+      res.send(result);
+    });
+
+    // users related api
+    app.get("/review/data", async (req, res) => {
+      const result = await reviewCollection.find().toArray();
+      res.send(result);
+    });
+
+    app.get("/latest/forum", async (req, res) => {
+      const cursor = forumCollection.find();
+      const result = await cursor.limit(6).toArray();
+      res.send(result);
+    });
+
+    // Define POST route to handle newsletter subscription
+    app.post("/subscribe", async(req, res) => {
+      const data = req.body;
+      console.log(data);
+      const result = await newsletterSubscriptionCollection.insertOne(data)
       res.send(result);
     });
 
