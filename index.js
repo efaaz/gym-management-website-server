@@ -21,15 +21,17 @@ app.use(
 );
 
 const verifyToken = (req, res, next) => {
-  console.log("inside verify token", req.headers.authorization);
+  console.log("Authorization Header:", req.headers.authorization);
   if (!req.headers.authorization) {
-    return res.status(401).send({ message: "unauthorized access" });
+    return res.status(401).send({ message: "Unauthorized access" });
   }
   const token = req.headers.authorization.split(" ")[1];
   jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
     if (err) {
-      return res.status(401).send({ message: "unauthorized access" });
+      console.error("JWT Error:", err);
+      return res.status(401).send({ message: "Unauthorized access" });
     }
+    console.log("Decoded Token:", decoded);
     req.decoded = decoded;
     next();
   });
@@ -40,12 +42,12 @@ const verifyAdmin = async (req, res, next) => {
   const email = req.decoded.email;
   const query = { email: email };
   const user = await userCollection.findOne(query);
-  const isAdmin = user?.role === "admin";
+  const isAdmin = user?.role === 'admin';
   if (!isAdmin) {
-    return res.status(403).send({ message: "forbidden access" });
+    return res.status(403).send({ message: 'forbidden access' });
   }
   next();
-};
+}
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.p9odpl5.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
 
@@ -60,6 +62,7 @@ const client = new MongoClient(uri, {
 
 async function run() {
   try {
+    await client.connect();
     const userCollection = client.db("gym-site").collection("users");
     const reviewCollection = client.db("gym-site").collection("reviewData");
     const forumCollection = client.db("gym-site").collection("forumData");
@@ -68,6 +71,35 @@ async function run() {
       .collection("newsletterSubscription");
 
     // jwt related api
+    app.get('/users/role/:email', verifyToken, async (req, res) => {
+      const email = req.params.email;
+      console.log("Role Check for Email:", email, "Decoded Email:", req.decoded.email);
+    
+      if (email !== req.decoded.email) {
+        return res.status(403).send({ message: 'Forbidden access' });
+      }
+    
+      const query = { email };
+      let user = await userCollection.findOne(query);
+    
+      if (!user) {
+        return res.status(404).send({ message: 'User not found' });
+      }
+    
+      if (!user.role) {
+        // Upsert the role to 'member' if it doesn't exist
+        await userCollection.updateOne(query, { $set: { role: 'member' } });
+        user = await userCollection.findOne(query); // Re-fetch the updated user
+      }
+    
+      const role = user.role;
+      console.log("User:", user, "Role:", role);
+    
+      res.send({ role: role });
+    });
+    
+    
+    
     app.post("/jwt", async (req, res) => {
       const user = req.body;
       const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, {
@@ -111,7 +143,7 @@ async function run() {
     app.post("/subscribe", async(req, res) => {
       const data = req.body;
       console.log(data);
-      const result = await newsletterSubscriptionCollection.insertOne(data)
+      const result = await newsletterSubscriptionCollection.insertOne(data);
       res.send(result);
     });
 
@@ -127,6 +159,8 @@ async function run() {
     );
   } finally {
     // Ensures that the client will close when you finish/error
+    // Uncomment the following line in production to ensure the MongoDB client closes
+    // await client.close();
   }
 }
 run().catch(console.dir);
