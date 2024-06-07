@@ -42,12 +42,12 @@ const verifyAdmin = async (req, res, next) => {
   const email = req.decoded.email;
   const query = { email: email };
   const user = await userCollection.findOne(query);
-  const isAdmin = user?.role === 'admin';
+  const isAdmin = user?.role === "admin";
   if (!isAdmin) {
-    return res.status(403).send({ message: 'forbidden access' });
+    return res.status(403).send({ message: "forbidden access" });
   }
   next();
-}
+};
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.p9odpl5.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
 
@@ -66,40 +66,47 @@ async function run() {
     const userCollection = client.db("gym-site").collection("users");
     const reviewCollection = client.db("gym-site").collection("reviewData");
     const forumCollection = client.db("gym-site").collection("forumData");
+    const allTrainersCollection = client
+      .db("gym-site")
+      .collection("all-trainers");
+    const trainersCollection = client.db("gym-site").collection("trainers");
     const newsletterSubscriptionCollection = client
       .db("gym-site")
       .collection("newsletterSubscription");
 
     // jwt related api
-    app.get('/users/role/:email', verifyToken, async (req, res) => {
+    app.get("/users/role/:email", verifyToken, async (req, res) => {
       const email = req.params.email;
-      console.log("Role Check for Email:", email, "Decoded Email:", req.decoded.email);
-    
+      console.log(
+        "Role Check for Email:",
+        email,
+        "Decoded Email:",
+        req.decoded.email
+      );
+
       if (email !== req.decoded.email) {
-        return res.status(403).send({ message: 'Forbidden access' });
+        return res.status(403).send({ message: "Forbidden access" });
       }
-    
+
       const query = { email };
       let user = await userCollection.findOne(query);
-    
+
       if (!user) {
-        return res.status(404).send({ message: 'User not found' });
+        return res.status(404).send({ message: "User not found" });
       }
-    
+
       if (!user.role) {
         // Upsert the role to 'member' if it doesn't exist
-        await userCollection.updateOne(query, { $set: { role: 'member' } });
+        await userCollection.updateOne(query, { $set: { role: "member" } });
         user = await userCollection.findOne(query); // Re-fetch the updated user
       }
-    
+
       const role = user.role;
       console.log("User:", user, "Role:", role);
-    
+
       res.send({ role: role });
     });
-    
-    
-    
+
     app.post("/jwt", async (req, res) => {
       const user = req.body;
       const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, {
@@ -140,11 +147,118 @@ async function run() {
     });
 
     // Define POST route to handle newsletter subscription
-    app.post("/subscribe", async(req, res) => {
+    app.post("/subscribe", async (req, res) => {
       const data = req.body;
       console.log(data);
       const result = await newsletterSubscriptionCollection.insertOne(data);
       res.send(result);
+    });
+
+    // get all trainer
+    app.get("/trainers", async (req, res) => {
+      const result = await allTrainersCollection.find().toArray();
+      res.send(result);
+    });
+
+    app.get("/trainers/:name", async (req, res) => {
+      const name = req.params.name;
+      const trainer = await allTrainersCollection.findOne({ name });
+      if (trainer) {
+        res.send(trainer);
+      } else {
+        res.status(404).send({ message: "Trainer not found" });
+      }
+    });
+
+    app.post("/apply-trainer", async (req, res) => {
+      try {
+        const trainerData = {
+          fullName: req.body.fullName,
+          email: req.body.email,
+          age: req.body.age,
+          profileImage: req.body.profileImage, // image URL
+          skills: req.body.skills,
+          availableDays: req.body.availableDays,
+          availableTime: req.body.availableTime,
+          status: req.body.status,
+        };
+
+        const result = await trainersCollection.insertOne(trainerData);
+        res.status(200).send(result);
+      } catch (error) {
+        res.status(500).send({
+          message: "There was an error submitting the application.",
+          error,
+        });
+      }
+    });
+
+    app.get("/forum", async (req, res) => {
+      const page = parseInt(req.query.page) || 1;
+      const limit = parseInt(req.query.limit) || 6; // Default limit is 6 posts per page
+      const skip = (page - 1) * limit;
+
+      try {
+        const cursor = forumCollection.find().skip(skip).limit(limit);
+        const totalCount = await forumCollection.countDocuments();
+        const totalPages = Math.ceil(totalCount / limit);
+
+        const result = await cursor.toArray();
+        const pagination = {
+          currentPage: page,
+          totalPages: totalPages,
+          hasMore: page < totalPages,
+        };
+
+        res.send({ posts: result, pagination: pagination });
+      } catch (error) {
+        res
+          .status(500)
+          .send({ message: "Internal Server Error", error: error });
+      }
+    });
+
+    // Route to handle upvoting a post
+    app.patch("/posts/:postId/upvote", async (req, res) => {
+      const { postId } = req.params;
+
+      const query = { _id: new ObjectId(postId) };
+      try {
+        await forumCollection.updateOne(query, { $inc: { upVotes: 1 } });
+        // Find the service after incrementing views
+        const service = await forumCollection.findOne(query);
+
+        // If service doesn't exist, return 404
+        if (!service) {
+          return res.status(404).send("Service not found");
+        }
+        res.send(service);
+      } catch (err) {
+        // Handle errors
+        res.status(500).send(err);
+      }
+    });
+
+    // Route to handle downvoting a post
+    app.patch("/posts/:postId/downvote", async(req, res) => {
+      const { postId } = req.params;
+
+      const query = { _id: new ObjectId(postId) };
+      try {
+        await forumCollection.updateOne(query, { $inc: { downVotes: 1 } });
+        // Find the service after incrementing views
+        const service = await forumCollection.findOne(query);
+
+        // If service doesn't exist, return 404
+        if (!service) {
+          return res.status(404).send("Service not found");
+        }
+        res.send(service);
+      } catch (err) {
+        // Handle errors
+        res.status(500).send(err);
+      }
+
     });
 
     app.get("/", (req, res) => {
