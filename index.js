@@ -78,20 +78,16 @@ async function run() {
     const allclassesCollection = client
       .db("gym-site")
       .collection("all-classes");
-    const newsletterSubscriptionCollection = client
+    const newsletterSubscribersCollection = client
       .db("gym-site")
-      .collection("newsletterSubscription");
+      .collection("newsletter-subscribers");
+    const applyTrainersCollection = client
+      .db("gym-site")
+      .collection("applied-trainers");
 
     // jwt related api
     app.get("/users/role/:email", verifyToken, async (req, res) => {
       const email = req.params.email;
-      console.log(
-        "Role Check for Email:",
-        email,
-        "Decoded Email:",
-        req.decoded.email
-      );
-
       if (email !== req.decoded.email) {
         return res.status(403).send({ message: "Forbidden access" });
       }
@@ -110,7 +106,6 @@ async function run() {
       }
 
       const role = user.role;
-      console.log("User:", user, "Role:", role);
 
       res.send({ role: role });
     });
@@ -131,8 +126,6 @@ async function run() {
 
     app.post("/users", async (req, res) => {
       const user = req.body;
-      // insert email if user doesnt exists:
-      // you can do this many ways (1. email unique, 2. upsert 3. simple checking)
       const query = { email: user.email };
       const existingUser = await userCollection.findOne(query);
       if (existingUser) {
@@ -157,8 +150,12 @@ async function run() {
     // Define POST route to handle newsletter subscription
     app.post("/subscribe", async (req, res) => {
       const data = req.body;
-      console.log(data);
-      const result = await newsletterSubscriptionCollection.insertOne(data);
+      const result = await newsletterSubscribersCollection.insertOne(data);
+      res.send(result);
+    });
+    // get newsletter subscribers information
+    app.get("/subscribers", async (req, res) => {
+      const result = await newsletterSubscribersCollection.find().toArray();
       res.send(result);
     });
 
@@ -191,7 +188,7 @@ async function run() {
           status: req.body.status,
         };
 
-        const result = await trainersCollection.insertOne(trainerData);
+        const result = await applyTrainersCollection.insertOne(trainerData);
         res.status(200).send(result);
       } catch (error) {
         res.status(500).send({
@@ -200,11 +197,30 @@ async function run() {
         });
       }
     });
+    app.get("/get-trainers", async (req, res) => {
+      const result = await applyTrainersCollection.find().toArray();
+      try {
+        res.send(result);
+      } catch {
+        res.status(404).send({ message: "Trainer not found" });
+      }
+    });
 
-    // app.get("/classes", async (req, res) => {
-    //   const result = await allclassesCollection.find().toArray();
-    //   res.send(result);
-    // });
+    // Route to fetch trainer details by ID
+
+    app.get("/applied-trainers/:id", async (req, res) => {
+      const { id } = req.params;
+
+      try {
+        let query = { _id: new ObjectId(id) }; // Ensure ObjectId is used correctly
+        const results = await applyTrainersCollection.findOne(query);
+
+        res.send(results);
+      } catch (error) {
+        console.error("Error fetching trainer details:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
 
     app.get("/classes", async (req, res) => {
       const page = parseInt(req.query.page) || 1;
@@ -301,8 +317,35 @@ async function run() {
     // Payment and booked trainer
     app.post("/payment", async (req, res) => {
       const data = req.body;
-      console.log(data);
       const result = await bookedTrainerCollection.insertOne(data);
+      res.send(result);
+    });
+
+    // find trainers
+    app.get("/trainer", async (req, res) => {
+      try {
+        const query = { role: "trainer" };
+        // Query to find all documents where the role field is "trainer"
+        const trainers = await userCollection.find(query).toArray(); // Corrected
+
+        // Send the trainers data as a response
+        res.send(trainers);
+      } catch (error) {
+        console.error("Error fetching trainers:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
+    // update role
+    app.patch("/updaterole", async (req, res) => {
+      const userInfo = req.body;
+      const filter = { email: userInfo.email };
+      const updateDoc = {
+        $set: {
+          role: "member",
+        },
+      };
+      const result = await userCollection.updateOne(filter, updateDoc);
       res.send(result);
     });
 
