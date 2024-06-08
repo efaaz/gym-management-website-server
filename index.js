@@ -65,6 +65,9 @@ async function run() {
     await client.connect();
     const userCollection = client.db("gym-site").collection("users");
     const reviewCollection = client.db("gym-site").collection("reviewData");
+    const bookedTrainerCollection = client
+      .db("gym-site")
+      .collection("bookedTrainer");
     const forumCollection = client.db("gym-site").collection("forumData");
     const allTrainersCollection = client
       .db("gym-site")
@@ -240,7 +243,7 @@ async function run() {
     });
 
     // Route to handle downvoting a post
-    app.patch("/posts/:postId/downvote", async(req, res) => {
+    app.patch("/posts/:postId/downvote", async (req, res) => {
       const { postId } = req.params;
 
       const query = { _id: new ObjectId(postId) };
@@ -258,7 +261,14 @@ async function run() {
         // Handle errors
         res.status(500).send(err);
       }
+    });
 
+    // Payment and booked trainer
+    app.post("/payment", async (req, res) => {
+      const data = req.body;
+      console.log(data);
+      const result = await bookedTrainerCollection.insertOne(data);
+      res.send(result);
     });
 
     app.get("/", (req, res) => {
