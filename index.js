@@ -72,7 +72,12 @@ async function run() {
     const allTrainersCollection = client
       .db("gym-site")
       .collection("all-trainers");
-    const trainersCollection = client.db("gym-site").collection("trainers");
+    const trainersCollection = client
+      .db("gym-site")
+      .collection("bookedtrainers");
+    const allclassesCollection = client
+      .db("gym-site")
+      .collection("all-classes");
     const newsletterSubscriptionCollection = client
       .db("gym-site")
       .collection("newsletterSubscription");
@@ -193,6 +198,36 @@ async function run() {
           message: "There was an error submitting the application.",
           error,
         });
+      }
+    });
+
+    // app.get("/classes", async (req, res) => {
+    //   const result = await allclassesCollection.find().toArray();
+    //   res.send(result);
+    // });
+
+    app.get("/classes", async (req, res) => {
+      const page = parseInt(req.query.page) || 1;
+      const limit = parseInt(req.query.limit) || 6; // Default limit is 6 classes per page
+      const skip = (page - 1) * limit;
+
+      try {
+        const cursor = allclassesCollection.find().skip(skip).limit(limit);
+        const totalCount = await allclassesCollection.countDocuments();
+        const totalPages = Math.ceil(totalCount / limit);
+
+        const result = await cursor.toArray();
+        const pagination = {
+          currentPage: page,
+          totalPages: totalPages,
+          hasMore: page < totalPages,
+        };
+
+        res.send({ data: result, pagination: pagination });
+      } catch (error) {
+        res
+          .status(500)
+          .send({ message: "Internal Server Error", error: error });
       }
     });
 
