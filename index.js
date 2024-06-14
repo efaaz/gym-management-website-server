@@ -175,6 +175,27 @@ async function run() {
       }
     });
 
+    app.get("/search-by-photo", async (req, res) => {
+      const { photoUrl } = req.query;
+
+      // Implement logic to find matching document in database based on photoUrl
+      try {
+        // Example MongoDB query
+        const trainer = await allTrainersCollection.findOne({
+          photo: photoUrl,
+        });
+
+        if (!trainer) {
+          return res.status(404).json({ message: "Trainer not found" });
+        }
+
+        res.json(trainer); // Send the matching document as JSON response
+      } catch (error) {
+        console.error("Error searching by photo:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
     app.post("/apply-trainer", async (req, res) => {
       try {
         const trainerData = {
