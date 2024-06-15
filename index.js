@@ -218,30 +218,6 @@ async function run() {
         });
       }
     });
-    app.get("/get-trainers", async (req, res) => {
-      const result = await applyTrainersCollection.find().toArray();
-      try {
-        res.send(result);
-      } catch {
-        res.status(404).send({ message: "Trainer not found" });
-      }
-    });
-
-    // Route to fetch trainer details by ID
-
-    app.get("/applied-trainers/:id", async (req, res) => {
-      const { id } = req.params;
-
-      try {
-        let query = { _id: new ObjectId(id) }; // Ensure ObjectId is used correctly
-        const results = await applyTrainersCollection.findOne(query);
-
-        res.send(results);
-      } catch (error) {
-        console.error("Error fetching trainer details:", error);
-        res.status(500).json({ message: "Internal Server Error" });
-      }
-    });
 
     app.get("/classes", async (req, res) => {
       const page = parseInt(req.query.page) || 1;
@@ -369,7 +345,242 @@ async function run() {
       const result = await userCollection.updateOne(filter, updateDoc);
       res.send(result);
     });
+    app.get("/get-trainers", async (req, res) => {
+      let query = { status: "pending" };
+      const result = await applyTrainersCollection.find(query).toArray();
+      try {
+        res.send(result);
+      } catch {
+        res.status(404).send({ message: "Trainer not found" });
+      }
+    });
+    // Route to fetch applied trainer details by ID
 
+    app.get("/applied-trainers/:id", async (req, res) => {
+      const { id } = req.params;
+
+      try {
+        let query = { _id: new ObjectId(id) }; // Ensure ObjectId is used correctly
+        const results = await applyTrainersCollection.findOne(query);
+
+        res.send(results);
+      } catch (error) {
+        console.error("Error fetching trainer details:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
+    // update the status to Trainer
+    // app.put("/update-trainer-status/:id", async (req, res) => {
+    //   const { id } = req.params;
+    //   const { status } = req.body;
+
+    //   try {
+    //     // Find the applied trainer by ID
+    //     const query = { _id: ObjectId(id) };
+    //     const trainer = await applyTrainersCollection.findOne(query);
+
+    //     // If the status is confirmed, update the user's role in the user collection
+    //     if (status === "confirmed") {
+    //       await userCollection.updateOne(
+    //         { email: trainer.email },
+    //         { $set: { role: "trainer" } }
+    //       );
+    //     }
+
+    //     // Remove the trainer from the applied trainers collection
+    //     await applyTrainersCollection.deleteOne(query);
+
+    //     res.send({ message: "Trainer status updated successfully" });
+    //   } catch (error) {
+    //     console.error("Error updating trainer status:", error);
+    //     res.status(500).json({ message: "Internal Server Error" });
+    //   }
+    // });
+
+    app.put("/update-trainer-status/:id", async (req, res) => {
+      const { id } = req.params;
+      const { status, feedback } = req.body;
+
+      try {
+        const query = { _id: new ObjectId(id) };
+        const update = { $set: { status, feedback } };
+        const options = { upsert: true };
+
+        await applyTrainersCollection.updateOne(query, update, options);
+        res
+          .status(200)
+          .send({ message: "Trainer status updated successfully" });
+      } catch (error) {
+        console.error("Error updating trainer status:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
+    // post add class
+    app.post("/add-class", async (req, res) => {
+      try {
+        const newClass = {
+          title: req.body.title,
+          coverImg: req.body.coverImg,
+          description: req.body.description,
+          trainerDetails: req.body.trainerDetails,
+          trainers: req.body.trainers,
+        };
+        const result = await allclassesCollection.insertOne(newClass);
+
+        res.status(200).send(result);
+      } catch (error) {
+        res.status(500).send({
+          message: "There was an error submitting the application.",
+          error,
+        });
+      }
+    });
+
+    app.get("/last-six-documents", async (req, res) => {
+      try {
+        // Query MongoDB to find last 6 documents
+        const lastSixDocs = await allclassesCollection
+          .find()
+          .sort({ _id: -1 })
+          .limit(6)
+          .toArray();
+
+        res.json(lastSixDocs);
+      } catch (err) {
+        res.status(500).json({ message: err.message });
+      }
+    });
+
+    // Member role routes
+
+    //Acivity log page
+    app.get("/activity-log", async (req, res) => {
+      try {
+        const query = { status: { $in: ["pending", "rejected"] } };
+        const trainers = await applyTrainersCollection.find(query).toArray();
+        res.send(trainers);
+      } catch (error) {
+        console.error("Error fetching activity log:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
+    // Profile page
+    app.get("/profile/:email", async (req, res) => {
+      const { email } = req.params;
+
+      try {
+        const user = await userCollection.findOne({ email: email });
+        res.send(user);
+      } catch (error) {
+        console.error("Error fetching user details:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
+    app.put("/profile/:email", async (req, res) => {
+      const { email } = req.params;
+      const { name, profilePicture, otherInfo } = req.body;
+
+      try {
+        const result = await userCollection.updateOne(
+          { email: email },
+          { $set: { name, profilePicture, otherInfo } },
+          { upsert: true }
+        );
+        if (result.modifiedCount === 1 || result.upsertedCount === 1) {
+          res.status(200).json({ message: "Profile updated successfully" });
+        } else {
+          res.status(500).json({ message: "Failed to update profile" });
+        }
+      } catch (error) {
+        console.error("Error updating profile:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
+    // Fetch booked trainer details by user ID
+    app.get("/booked-trainer/:userId", async (req, res) => {
+      const { userId } = req.params;
+
+      try {
+        const booking = await bookingsCollection.findOne({ userId: userId });
+        if (!booking) {
+          return res
+            .status(404)
+            .json({ message: "No booking found for this user" });
+        }
+
+        const trainer = await trainersCollection.findOne({
+          _id: new ObjectId(booking.trainerId),
+        });
+        if (!trainer) {
+          return res
+            .status(404)
+            .json({ message: "No trainer found with this ID" });
+        }
+
+        res.send({ trainer, booking });
+      } catch (error) {
+        console.error("Error fetching booked trainer details:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
+    // Fetch classes and slots information
+    app.get("/trainer-classes-slots/:trainerId", async (req, res) => {
+      const { trainerId } = req.params;
+
+      try {
+        const trainer = await trainersCollection.findOne({
+          _id: new ObjectId(trainerId),
+        });
+        if (!trainer) {
+          return res
+            .status(404)
+            .json({ message: "No trainer found with this ID" });
+        }
+
+        const classes = await classesCollection
+          .find({ trainerId: trainerId })
+          .toArray();
+        const slots = await slotsCollection
+          .find({ trainerId: trainerId })
+          .toArray();
+
+        res.send({ classes, slots });
+      } catch (error) {
+        console.error("Error fetching classes and slots:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
+    app.get("/sum-of-prices", async (req, res) => {
+      try {
+        const aggregationPipeline = [
+          {
+            $group: {
+              _id: null,
+              total: { $sum: "$price" },
+            },
+          },
+        ];
+
+        const result = await bookedTrainerCollection
+          .aggregate(aggregationPipeline)
+          .toArray();
+
+        if (result.length > 0) {
+          res.json({ sumOfPrices: result[0].total });
+        } else {
+          res.json({ sumOfPrices: 0 }); // Handle case where no documents match
+        }
+      } catch (err) {
+        res.status(500).json({ message: err.message });
+      }
+    });
     app.get("/", (req, res) => {
       res.send("Hello World!");
     });
