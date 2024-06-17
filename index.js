@@ -502,57 +502,62 @@ async function run() {
     });
 
     // Fetch booked trainer details by user ID
-    app.get("/booked-trainer/:userId", async (req, res) => {
-      const { userId } = req.params;
+    app.get("/booked-trainer/:email", async (req, res) => {
+      const { email } = req.params;
 
       try {
-        const booking = await bookingsCollection.findOne({ userId: userId });
+        const booking = await bookedTrainerCollection.findOne({
+          userEmail: email,
+        });
+
         if (!booking) {
           return res
             .status(404)
-            .json({ message: "No booking found for this user" });
+            .json({ message: "No booking found for this user." });
         }
 
-        const trainer = await trainersCollection.findOne({
-          _id: new ObjectId(booking.trainerId),
+        const trainer = await allTrainersCollection.findOne({
+          _id: new ObjectId("6663224737ce6ed411df5518"),
         });
-        if (!trainer) {
-          return res
-            .status(404)
-            .json({ message: "No trainer found with this ID" });
-        }
 
-        res.send({ trainer, booking });
+        res.json({ booking, trainer });
       } catch (error) {
         console.error("Error fetching booked trainer details:", error);
         res.status(500).json({ message: "Internal Server Error" });
       }
     });
 
-    // Fetch classes and slots information
-    app.get("/trainer-classes-slots/:trainerId", async (req, res) => {
-      const { trainerId } = req.params;
-
+    app.get("/trainer-classes-slots", async (req, res) => {
       try {
-        const trainer = await trainersCollection.findOne({
-          _id: new ObjectId(trainerId),
-        });
-        if (!trainer) {
-          return res
-            .status(404)
-            .json({ message: "No trainer found with this ID" });
-        }
-
-        const classes = await classesCollection
-          .find({ trainerId: trainerId })
+        const classes = await allclassesCollection
+          .find({ title: "Pilates" })
           .toArray();
-        const slots = await slotsCollection
-          .find({ trainerId: trainerId })
+        const slots = await allTrainersCollection
+          .find({ availableSlots: "Mon-Fri, 9am-5pm" })
           .toArray();
 
-        res.send({ classes, slots });
+        res.json({ classes, slots });
       } catch (error) {
         console.error("Error fetching classes and slots:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
+    app.post("/submit-feedback", async (req, res) => {
+      const { userEmail, feedback, name, image, rating } = req.body;
+
+      try {
+        const result = await reviewCollection.insertOne({
+          userEmail: userEmail,
+          review: feedback,
+          name: name,
+          image: image,
+          rating: rating,
+        });
+
+        res.json({ message: "Feedback submitted successfully" });
+      } catch (error) {
+        console.error("Error submitting feedback:", error);
         res.status(500).json({ message: "Internal Server Error" });
       }
     });
