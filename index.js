@@ -84,6 +84,9 @@ async function run() {
     const applyTrainersCollection = client
       .db("gym-site")
       .collection("applied-trainers");
+    const slotsCollection = client
+      .db("gym-site")
+      .collection("slots-collection");
 
     // jwt related api
     app.get("/users/role/:email", verifyToken, async (req, res) => {
@@ -220,27 +223,29 @@ async function run() {
     });
 
     app.get("/classes", async (req, res) => {
-      const page = parseInt(req.query.page) || 1;
-      const limit = parseInt(req.query.limit) || 6; // Default limit is 6 classes per page
+      const { page = 1, limit = 6, search = "" } = req.query;
+      const searchRegex = new RegExp(search, "i"); // Case-insensitive search regex
       const skip = (page - 1) * limit;
 
       try {
-        const cursor = allclassesCollection.find().skip(skip).limit(limit);
-        const totalCount = await allclassesCollection.countDocuments();
-        const totalPages = Math.ceil(totalCount / limit);
+        const classes = await allclassesCollection
+          .find({
+            title: { $regex: searchRegex },
+          })
+          .skip(skip)
+          .limit(parseInt(limit))
+          .toArray();
 
-        const result = await cursor.toArray();
-        const pagination = {
-          currentPage: page,
-          totalPages: totalPages,
-          hasMore: page < totalPages,
-        };
+        const totalClasses = await allclassesCollection.countDocuments({
+          title: { $regex: searchRegex },
+        });
 
-        res.send({ data: result, pagination: pagination });
+        const hasMore = totalClasses > page * limit;
+
+        res.json({ data: classes, pagination: { page, hasMore } });
       } catch (error) {
-        res
-          .status(500)
-          .send({ message: "Internal Server Error", error: error });
+        console.error("Error fetching classes:", error);
+        res.status(500).json({ message: "Internal Server Error" });
       }
     });
 
@@ -319,12 +324,11 @@ async function run() {
     });
 
     // find trainers
-    app.get("/trainer", async (req, res) => {
+    app.get("/trainer", verifyToken, async (req, res) => {
       try {
         const query = { role: "trainer" };
         // Query to find all documents where the role field is "trainer"
-        const trainers = await userCollection.find(query).toArray(); // Corrected
-
+        const trainers = await userCollection.find(query).toArray();
         // Send the trainers data as a response
         res.send(trainers);
       } catch (error) {
@@ -345,7 +349,7 @@ async function run() {
       const result = await userCollection.updateOne(filter, updateDoc);
       res.send(result);
     });
-    app.get("/get-trainers", async (req, res) => {
+    app.get("/get-trainers", verifyToken, async (req, res) => {
       let query = { status: "pending" };
       const result = await applyTrainersCollection.find(query).toArray();
       try {
@@ -356,7 +360,7 @@ async function run() {
     });
     // Route to fetch applied trainer details by ID
 
-    app.get("/applied-trainers/:id", async (req, res) => {
+    app.get("/applied-trainers/:id", verifyToken, async (req, res) => {
       const { id } = req.params;
 
       try {
@@ -400,14 +404,24 @@ async function run() {
 
     app.put("/update-trainer-status/:id", async (req, res) => {
       const { id } = req.params;
-      const { status, feedback } = req.body;
-
+      const { status, feedback, email } = req.body;
       try {
-        const query = { _id: new ObjectId(id) };
-        const update = { $set: { status, feedback } };
+        const query1 = { _id: new ObjectId(id) };
         const options = { upsert: true };
+        const query2 = { email: email };
+        const update1 = { $set: { status, feedback } };
+        const update2 = { $set: { role: "trainer" } };
 
-        await applyTrainersCollection.updateOne(query, update, options);
+        // Update the trainer's status and feedback
+        const result1 = await applyTrainersCollection.updateOne(
+          query1,
+          update1,
+          options
+        );
+
+        // Update the user's role if the trainer's status update was successful
+        const result2 = await userCollection.updateOne(query2, update2);
+
         res
           .status(200)
           .send({ message: "Trainer status updated successfully" });
@@ -438,7 +452,7 @@ async function run() {
       }
     });
 
-    app.get("/last-six-documents", async (req, res) => {
+    app.get("/last-six-documents", verifyToken, async (req, res) => {
       try {
         // Query MongoDB to find last 6 documents
         const lastSixDocs = await allclassesCollection
@@ -452,11 +466,48 @@ async function run() {
         res.status(500).json({ message: err.message });
       }
     });
+    // Endpoint to get total balance and last six transactions
+    app.get("/balance", verifyToken, async (req, res) => {
+      try {
+        const transactions = await bookedTrainerCollection
+          .find({})
+          .limit(6)
+          .toArray();
 
+        const totalBalance = await bookedTrainerCollection
+          .aggregate([{ $group: { _id: null, total: { $sum: "$price" } } }])
+          .toArray();
+
+        res.status(200).json({
+          totalBalance: totalBalance[0]?.total || 0,
+          transactions,
+        });
+      } catch (error) {
+        console.error("Error fetching balance data:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
+    // Endpoint to get total newsletter subscribers and total paid members
+    app.get("/stats", async (req, res) => {
+      try {
+        const totalSubscribers =
+          await newsletterSubscribersCollection.countDocuments();
+        const totalPaidMembers = await bookedTrainerCollection.countDocuments();
+
+        res.status(200).json({
+          totalSubscribers,
+          totalPaidMembers,
+        });
+      } catch (error) {
+        console.error("Error fetching stats data:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
     // Member role routes
 
     //Acivity log page
-    app.get("/activity-log", async (req, res) => {
+    app.get("/activity-log", verifyToken, async (req, res) => {
       try {
         const query = { status: { $in: ["pending", "rejected"] } };
         const trainers = await applyTrainersCollection.find(query).toArray();
@@ -468,7 +519,7 @@ async function run() {
     });
 
     // Profile page
-    app.get("/profile/:email", async (req, res) => {
+    app.get("/profile/:email", verifyToken, async (req, res) => {
       const { email } = req.params;
 
       try {
@@ -502,7 +553,7 @@ async function run() {
     });
 
     // Fetch booked trainer details by user ID
-    app.get("/booked-trainer/:email", async (req, res) => {
+    app.get("/booked-trainer/:email", verifyToken, async (req, res) => {
       const { email } = req.params;
 
       try {
@@ -527,7 +578,7 @@ async function run() {
       }
     });
 
-    app.get("/trainer-classes-slots", async (req, res) => {
+    app.get("/trainer-classes-slots", verifyToken, async (req, res) => {
       try {
         const classes = await allclassesCollection
           .find({ title: "Pilates" })
@@ -562,30 +613,95 @@ async function run() {
       }
     });
 
-    app.get("/sum-of-prices", async (req, res) => {
+    // Trainer Role Routes
+
+    app.post("/add-forum", async (req, res) => {
+      const { title, description, userRole } = req.body;
+
+      const newForum = {
+        title: title,
+        description: description,
+        badge: userRole,
+      };
+
       try {
-        const aggregationPipeline = [
-          {
-            $group: {
-              _id: null,
-              total: { $sum: "$price" },
-            },
-          },
-        ];
-
-        const result = await bookedTrainerCollection
-          .aggregate(aggregationPipeline)
-          .toArray();
-
-        if (result.length > 0) {
-          res.json({ sumOfPrices: result[0].total });
-        } else {
-          res.json({ sumOfPrices: 0 }); // Handle case where no documents match
-        }
-      } catch (err) {
-        res.status(500).json({ message: err.message });
+        const result = await forumCollection.insertOne(newForum);
+        res.status(200).json({ message: "Forum added successfully" });
+      } catch (error) {
+        console.error("Error adding forum:", error);
+        res.status(500).json({ message: "Internal Server Error" });
       }
     });
+
+    // Trainer Role Routes
+    app.get("/trainer-slots/:email", async (req, res) => {
+      const { email } = req.params;
+      try {
+        const slots = await applyTrainersCollection
+          .find({ email: email })
+          .toArray();
+        res.status(200).send(slots);
+      } catch (error) {
+        console.error("Error fetching slots:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+    app.delete("/delete-slot/:id", async (req, res) => {
+      const { id } = req.params;
+      try {
+        const result = await applyTrainersCollection.deleteOne({
+          _id: new ObjectId(id),
+        });
+        if (result.deletedCount === 1) {
+          res.status(200).send({ message: "Slot deleted successfully" });
+        } else {
+          res.status(404).json({ message: "Slot not found" });
+        }
+      } catch (error) {
+        console.error("Error deleting slot:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
+    // Add a new slot
+    app.get("/trainer-details/:email", async (req, res) => {
+      const { email } = req.params;
+      try {
+        const trainer = await applyTrainersCollection.findOne({ email });
+        res.status(200).send(trainer);
+      } catch (error) {
+        console.error("Error fetching trainer details:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
+    app.post("/add-slot", async (req, res) => {
+      const {
+        trainerEmail,
+        slotName,
+        slotTime,
+        selectedDays,
+        selectedClasses,
+        otherInfo,
+      } = req.body;
+      try {
+        const newSlot = {
+          trainerEmail,
+          slotName,
+          slotTime,
+          selectedDays,
+          selectedClasses,
+          otherInfo,
+        };
+
+        const result = await slotsCollection.insertOne(newSlot);
+
+        res.status(200).send({ message: "Slot added successfully" });
+      } catch (error) {
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
     app.get("/", (req, res) => {
       res.send("Hello World!");
     });
